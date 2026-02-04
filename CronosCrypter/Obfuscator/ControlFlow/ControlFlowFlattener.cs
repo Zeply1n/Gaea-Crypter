@@ -3,7 +3,6 @@ using dnlib.DotNet.Emit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Diagnostics;
 
 namespace CronosCrypter.Obfuscator.ControlFlow
 {
@@ -16,14 +15,7 @@ namespace CronosCrypter.Obfuscator.ControlFlow
                 return;
             }
 
-            try
-            {
-                FlattenMethod(module.EntryPoint);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Control flow flattening failed for entry point: {ex}");
-            }
+            FlattenMethod(module.EntryPoint);
         }
 
         private static void FlattenMethod(MethodDef method)
@@ -178,20 +170,7 @@ namespace CronosCrypter.Obfuscator.ControlFlow
                     leaders.Add(target);
                 }
 
-                if (instruction.Operand is Instruction[] targets)
-                {
-                    foreach (Instruction targetInstruction in targets)
-                    {
-                        leaders.Add(targetInstruction);
-                    }
-                }
-
                 if (instruction.OpCode.FlowControl == FlowControl.Cond_Branch && i + 1 < instructions.Count)
-                {
-                    leaders.Add(instructions[i + 1]);
-                }
-
-                if (IsBlockTerminator(instruction) && i + 1 < instructions.Count)
                 {
                     leaders.Add(instructions[i + 1]);
                 }
@@ -212,20 +191,6 @@ namespace CronosCrypter.Obfuscator.ControlFlow
             }
 
             return blocks;
-        }
-
-        private static bool IsBlockTerminator(Instruction instruction)
-        {
-            if (instruction == null)
-            {
-                return false;
-            }
-
-            FlowControl flowControl = instruction.OpCode.FlowControl;
-            return flowControl == FlowControl.Branch
-                || flowControl == FlowControl.Cond_Branch
-                || flowControl == FlowControl.Return
-                || flowControl == FlowControl.Throw;
         }
 
         private static bool TryGetTargetIndex(Dictionary<Instruction, int> blockLookup, object operand, out int index)
