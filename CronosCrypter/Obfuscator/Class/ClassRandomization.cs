@@ -4,8 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using System.Runtime;
+using System.Diagnostics;
 
 namespace CronosCrypter.Obfuscator.Class
 {
@@ -13,6 +12,10 @@ namespace CronosCrypter.Obfuscator.Class
     {
         public static void Execute(ModuleDef module)
         {
+            if (module == null)
+            {
+                return;
+            }
 
             /// <summary>
             /// Very simple class randomization obfuscator, based on dnlib
@@ -28,7 +31,10 @@ namespace CronosCrypter.Obfuscator.Class
             /// </summary>
 
             module.Name = Randomize.RandomCharacters(15);
-            module.EntryPoint.Name = Randomize.RandomCharacters(15);
+            if (module.EntryPoint != null)
+            {
+                module.EntryPoint.Name = Randomize.RandomCharacters(15);
+            }
             module.EncBaseId = Guid.NewGuid();
             module.EncId = Guid.NewGuid();
             module.Mvid = Guid.NewGuid();
@@ -123,7 +129,7 @@ namespace CronosCrypter.Obfuscator.Class
                             // c# variable has for loop scope only
                             string regString = strings.Body.Instructions[i].Operand.ToString();
                             string encString = Convert.ToBase64String(UTF8Encoding.UTF8.GetBytes(regString));
-                            Console.WriteLine($"{regString} -> {encString}");
+                            Debug.WriteLine($"{regString} -> {encString}");
                             // methodology for adding code: write it in plain c#, compile, then view IL in dnspy
                             strings.Body.Instructions[i].OpCode = OpCodes.Nop; // errors occur if instruction not replaced with Nop
                             strings.Body.Instructions.Insert(i + 1, new Instruction(OpCodes.Call, module.Import(typeof(System.Text.Encoding).GetMethod("get_UTF8", new Type[] { })))); // Load string onto stack
@@ -148,7 +154,10 @@ namespace CronosCrypter.Obfuscator.Class
                 // here is an example:
                 // module.Assembly.Name = "Cronos-Crypter" + Randomize.RandomCharacters(15);
 
-                module.Assembly.Name = Randomize.RandomCharacters(15);
+                if (module.Assembly != null)
+                {
+                    module.Assembly.Name = Randomize.RandomCharacters(15);
+                }
 
 
                 string[] attri = { "AssemblyVersionAttribute", "AssemblyDescriptionAttribute",
@@ -156,6 +165,11 @@ namespace CronosCrypter.Obfuscator.Class
                     "AssemblyCompanyAttribute", "AssemblyFileVersionAttribute", "GuidAttribute", "TargetFrameworkAttribute",
                     "TargetFrameworkAttribute.FrameworkDisplayName", "AssemblyConfigurationAttribute", "AssemblyTrademarkAttribute",};
 
+
+                if (module.Assembly == null)
+                {
+                    continue;
+                }
 
                 foreach (CustomAttribute attribute in module.Assembly.CustomAttributes)
                 {
