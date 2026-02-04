@@ -71,6 +71,7 @@
     </Compile>
     <Compile Include="Obfuscator\Class\ClassIncreaser.cs" />
     <Compile Include="Obfuscator\Class\ClassRandomization.cs" />
+    <Compile Include="Obfuscator\ControlFlow\ControlFlowFlattener.cs" />
     <Compile Include="Obfuscator\Obfuscate.cs" />
     <Compile Include="Obfuscator\Randomize.cs" />
     <Compile Include="Obfuscator\String\StringSplitter.cs" />
