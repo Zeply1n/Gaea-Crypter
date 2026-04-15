@@ -1,66 +1,98 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace CronosCrypter.Core
 {
     public class Encryption
     {
+        private const int AesSaltSize = 16;
+        private const int KeyDerivationIterations = 100000;
+
         public static byte[] Encrypt(byte[] payload, EncryptionType encryption, string key)
         {
-            byte[] encrypted;
-
-            if(encryption == EncryptionType.AES)
+            if (payload == null)
             {
-                encrypted = AES_Encrypt(payload, key);
-            }
-            else
-            {
-                encrypted = XOR_Encrypt(payload, key);
+                throw new ArgumentNullException(nameof(payload));
             }
 
-            return encrypted;
+            if (string.IsNullOrEmpty(key))
+            {
+                throw new ArgumentException("Encryption key must not be null or empty.", nameof(key));
+            }
+
+            return encryption == EncryptionType.AES
+                ? AES_Encrypt(payload, key)
+                : XOR_Encrypt(payload, key);
         }
 
         private static byte[] AES_Encrypt(byte[] bytesToBeEncrypted, string encKey)
         {
-            byte[] encryptedBytes = null;
+            byte[] saltBytes = new byte[AesSaltSize];
+            RandomNumberGenerator.Fill(saltBytes);
 
-            // TODO: Add random saltbytes generator
-            byte[] saltBytes = new byte[] { 054, 022, 153, 017 , 088, 055, 112, 212};
-            using (MemoryStream ms = new MemoryStream())              
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(encKey);
+            byte[] aesKey = null;
+            byte[] aesIv = null;
+
+            try
             {
-                using (RijndaelManaged AES = new RijndaelManaged())
+                using (var keyDerivation = new Rfc2898DeriveBytes(passwordBytes, saltBytes, KeyDerivationIterations, HashAlgorithmName.SHA256))
+                using (var ms = new MemoryStream())
+                using (var aes = new AesCryptoServiceProvider())
                 {
-                    AES.KeySize = 256;
-                    AES.BlockSize = 128;
-                    var passwordBytes = Encoding.UTF8.GetBytes(encKey);
-                    var key = new Rfc2898DeriveBytes(passwordBytes, saltBytes, 1000);
-                    AES.Key = key.GetBytes(AES.KeySize / 8);
-                    AES.IV = key.GetBytes(AES.BlockSize / 8);
-                    AES.Mode = CipherMode.CBC;
-                    using (var cs = new CryptoStream(ms, AES.CreateEncryptor(), CryptoStreamMode.Write))
+                    aes.KeySize = 256;
+                    aes.BlockSize = 128;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.PKCS7;
+
+                    aesKey = keyDerivation.GetBytes(aes.KeySize / 8);
+                    aesIv = keyDerivation.GetBytes(aes.BlockSize / 8);
+                    aes.Key = aesKey;
+                    aes.IV = aesIv;
+
+                    using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
                     {
                         cs.Write(bytesToBeEncrypted, 0, bytesToBeEncrypted.Length);
-                        cs.Close();
+                        cs.FlushFinalBlock();
                     }
-                    encryptedBytes = ms.ToArray();
+
+                    byte[] cipherText = ms.ToArray();
+                    byte[] payloadWithSalt = new byte[saltBytes.Length + cipherText.Length];
+
+                    Buffer.BlockCopy(saltBytes, 0, payloadWithSalt, 0, saltBytes.Length);
+                    Buffer.BlockCopy(cipherText, 0, payloadWithSalt, saltBytes.Length, cipherText.Length);
+                    Array.Clear(cipherText, 0, cipherText.Length);
+
+                    return payloadWithSalt;
                 }
             }
-            return encryptedBytes;
+            finally
+            {
+                // Clear all sensitive material as soon as possible.
+                Array.Clear(passwordBytes, 0, passwordBytes.Length);
+                Array.Clear(saltBytes, 0, saltBytes.Length);
+
+                if (aesKey != null)
+                {
+                    Array.Clear(aesKey, 0, aesKey.Length);
+                }
+
+                if (aesIv != null)
+                {
+                    Array.Clear(aesIv, 0, aesIv.Length);
+                }
+            }
         }
 
         private static byte[] XOR_Encrypt(byte[] bytesToBeEncrypted, string key)
         {
             byte[] encryptedBytes = new byte[bytesToBeEncrypted.Length];
 
-            for(int i = 0; i < bytesToBeEncrypted.Length; i++)
+            for (int i = 0; i < bytesToBeEncrypted.Length; i++)
             {
-                encryptedBytes[i] = ((byte)(bytesToBeEncrypted[i] ^ key[i % key.Length]));
+                encryptedBytes[i] = (byte)(bytesToBeEncrypted[i] ^ key[i % key.Length]);
             }
 
             return encryptedBytes;
