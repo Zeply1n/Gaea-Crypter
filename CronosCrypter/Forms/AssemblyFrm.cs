@@ -10,7 +10,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Toolbelt.Drawing;
 
 namespace CronosCrypter.Forms
 {
@@ -39,9 +38,17 @@ namespace CronosCrypter.Forms
         #region Code
         private void CreateTempIconPath(string source, string output)
         {
-            using (FileStream fileStream = new FileStream(output, FileMode.Create))
+            using (Icon icon = Icon.ExtractAssociatedIcon(source))
             {
-                IconExtractor.Extract1stIconTo(source, fileStream);
+                if (icon == null)
+                {
+                    throw new InvalidOperationException("Unable to extract icon from source file.");
+                }
+
+                using (FileStream fileStream = new FileStream(output, FileMode.Create))
+                {
+                    icon.Save(fileStream);
+                }
             }
         }
         private void LoadCurrentSettings()
