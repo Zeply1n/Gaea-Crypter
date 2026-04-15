@@ -5,94 +5,120 @@ using System.Collections.Generic;
 
 namespace CronosCrypter.Obfuscator.String
 {
-    class StringSplitter
+    internal class StringSplitter
     {
+        private const int ChunkSize = 3;
+
         public static void Execute(ModuleDef module)
         {
-            /// <summary>
-            /// Simple string splitter, thanks to concatenation, strings can still be used even if they are splitted.
-            /// 
-            /// This function splits them into groups of 3 chars, here is an example:
-            /// "abc" + "def" + "ghi"
-            /// </summary>
+            if (module == null)
+            {
+                return;
+            }
+
+            IMethod concatArrayMethod = module.Import(
+                typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string[]) })
+            );
 
             foreach (TypeDef type in module.Types)
             {
-                foreach (MethodDef method in type.Methods)
+                ProcessType(type, concatArrayMethod);
+            }
+        }
+
+        private static void ProcessType(TypeDef type, IMethod concatArrayMethod)
+        {
+            foreach (MethodDef method in type.Methods)
+            {
+                if (!method.HasBody)
                 {
-                    if (!method.HasBody)
-                        continue;
-
-                    var body = method.Body;
-                    for (int i = 0; i < body.Instructions.Count; i++)
-                    {
-                        var instr = body.Instructions[i];
-
-                        // Check if instruction is a load string (ldstr) instruction
-                        if (instr.OpCode == OpCodes.Ldstr)
-                        {
-                            string originalString = (string)instr.Operand;
-
-                            // Split the string into multiple parts
-                            string newString = SplitString(originalString);
-
-                            // Create the new instructions for the concatenated string
-                            var instructions = CreateConcatenatedStringInstructions(newString, module);
-
-                            // Remove the original ldstr instruction
-                            body.Instructions.RemoveAt(i);
-
-                            // Insert each new instruction manually
-                            for (int j = 0; j < instructions.Count; j++)
-                            {
-                                body.Instructions.Insert(i + j, instructions[j]);
-                            }
-
-                            // Adjust index since we inserted multiple instructions
-                            i += instructions.Count - 1;
-                        }
-                    }
+                    continue;
                 }
+
+                ProcessMethod(method, concatArrayMethod);
             }
-        }
 
-        // Function splits string
-        static string SplitString(string str)
-        {
-            // Example: split the string into groups of 3 characters
-            int splitSize = 3;
-            string result = "";
-
-            for (int i = 0; i < str.Length; i += splitSize)
+            foreach (TypeDef nestedType in type.NestedTypes)
             {
-                if (i + splitSize <= str.Length)
-                    result += str.Substring(i, splitSize) + "\" + \"";
-                else
-                    result += str.Substring(i);
+                ProcessType(nestedType, concatArrayMethod);
             }
-
-            return result.TrimEnd("\" + \"".ToCharArray()); // Remove trailing concatenation
         }
 
-        // Function creates instructions to concatenate strings
-        static List<Instruction> CreateConcatenatedStringInstructions(string concatenatedString, ModuleDef module)
+        private static void ProcessMethod(MethodDef method, IMethod concatArrayMethod)
         {
-            string[] parts = concatenatedString.Split(new string[] { "\" + \"" }, StringSplitOptions.None);
+            CilBody body = method.Body;
+            body.SimplifyBranches();
+            body.SimplifyMacros(method.Parameters);
+
+            for (int i = 0; i < body.Instructions.Count; i++)
+            {
+                Instruction originalInstruction = body.Instructions[i];
+                if (originalInstruction.OpCode != OpCodes.Ldstr)
+                {
+                    continue;
+                }
+
+                string originalString = originalInstruction.Operand as string;
+                if (string.IsNullOrEmpty(originalString) || originalString.Length <= ChunkSize)
+                {
+                    continue;
+                }
+
+                string[] chunks = SplitToChunks(originalString, ChunkSize);
+                List<Instruction> replacement = CreateConcatArrayInstructions(chunks, concatArrayMethod, method.Module);
+                if (replacement.Count == 0)
+                {
+                    continue;
+                }
+
+                // Keep the original instruction instance so any existing branch targets remain valid.
+                originalInstruction.OpCode = replacement[0].OpCode;
+                originalInstruction.Operand = replacement[0].Operand;
+
+                for (int j = 1; j < replacement.Count; j++)
+                {
+                    body.Instructions.Insert(i + j, replacement[j]);
+                }
+
+                i += replacement.Count - 1;
+            }
+
+            // Ensure dnlib metadata (including offsets) is synchronized after instruction edits.
+            body.UpdateInstructionOffsets();
+            body.OptimizeBranches();
+            body.OptimizeMacros();
+        }
+
+        private static string[] SplitToChunks(string input, int chunkSize)
+        {
+            int chunkCount = (input.Length + chunkSize - 1) / chunkSize;
+            string[] parts = new string[chunkCount];
+
+            for (int i = 0; i < chunkCount; i++)
+            {
+                int start = i * chunkSize;
+                int length = Math.Min(chunkSize, input.Length - start);
+                parts[i] = input.Substring(start, length);
+            }
+
+            return parts;
+        }
+
+        private static List<Instruction> CreateConcatArrayInstructions(string[] parts, IMethod concatArrayMethod, ModuleDef module)
+        {
             var instructions = new List<Instruction>();
+            instructions.Add(Instruction.Create(OpCodes.Ldc_I4, parts.Length));
+            instructions.Add(Instruction.Create(OpCodes.Newarr, module.CorLibTypes.String.ToTypeDefOrRef()));
 
-            // Load the first part
-            instructions.Add(Instruction.Create(OpCodes.Ldstr, parts[0]));
-
-            // For each additional part, load the string and concatenate
-            for (int i = 1; i < parts.Length; i++)
+            for (int i = 0; i < parts.Length; i++)
             {
-                // Load the next part
+                instructions.Add(Instruction.Create(OpCodes.Dup));
+                instructions.Add(Instruction.Create(OpCodes.Ldc_I4, i));
                 instructions.Add(Instruction.Create(OpCodes.Ldstr, parts[i]));
-                // Add string concatenation (OpCodes.Call to System.String.Concat)
-                instructions.Add(Instruction.Create(OpCodes.Call,
-                    module.Import(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) }))));
+                instructions.Add(Instruction.Create(OpCodes.Stelem_Ref));
             }
 
+            instructions.Add(Instruction.Create(OpCodes.Call, concatArrayMethod));
             return instructions;
         }
     }
